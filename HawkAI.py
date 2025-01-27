@@ -1,21 +1,34 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from langchain_groq import ChatGroq
 from difflib import SequenceMatcher
+import validators
 
-# Define function to initialize the Groq model
-def initialize_groq_model():
-    return ChatGroq(
-        temperature=0.2,  # Low temperature to minimize creative generation
-        model_name="llama3-8b-8192",
-        groq_api_key=st.secrets["general"]["GROQ_API_KEY"]
-    )
+# Define function to initialize the DeepSeek model
+def initialize_deepseek_model():
+    deepseek_api_key = st.secrets["DEEPSEEK_API_KEY"]  # Use Streamlit Secrets
+    deepseek_endpoint = "https://api.deepseek.com/v1/chat/completions"  # Replace with actual endpoint
+    headers = {
+        "Authorization": f"Bearer {deepseek_api_key}",
+        "Content-Type": "application/json"
+    }
+    return deepseek_endpoint, headers
 
 # Simple text splitting function
 def simple_text_split(text, chunk_size=500):
     return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
 
+# Validate URLs
+def validate_urls(urls):
+    valid_urls = []
+    for url in urls:
+        if validators.url(url):
+            valid_urls.append(url)
+        else:
+            st.warning(f"Invalid URL: {url}")
+    return valid_urls
+
+# Scrape website content
 @st.cache_data(show_spinner=True)
 def scrape_website(urls):
     headers = {'User-Agent': 'HawkAI/1.0 (+https://www.hartford.edu)'}
@@ -34,6 +47,7 @@ def scrape_website(urls):
             st.error(f"Error scraping {url}: {e}")
     return url_contexts
 
+# Find relevant chunks based on query
 def find_relevant_chunks(query, contexts, token_limit=6000, prioritized_urls=None):
     prioritized_urls = prioritized_urls or []
     relevant_chunks = []
@@ -66,19 +80,20 @@ def find_relevant_chunks(query, contexts, token_limit=6000, prioritized_urls=Non
 
     return relevant_chunks, source_urls
 
+# Truncate context to token limit
 def truncate_context_to_token_limit(context, max_tokens):
     words = context.split()
     if len(words) > max_tokens:
         words = words[:max_tokens]
     return " ".join(words)
 
+# Main function
 def main():
     st.title("🦅 Hawk AI: Your Admissions Assistant")
     st.write("I am Howie AI, how can I assist you today?")
 
     # Critical URLs to scrape
-    urls = [ 
-        "https://www.hartford.edu/academics/graduate-professional-studies/about-graduate-and-professional-studies.aspx",
+    urls = [  "https://www.hartford.edu/academics/graduate-professional-studies/about-graduate-and-professional-studies.aspx",
         "https://www.hartford.edu/admission/graduate-admission/default.aspx",
         "https://www.hartford.edu/academics/graduate-professional-studies/graduate-studies/graduate-programs.aspx",
         "https://www.hartford.edu/academics/graduate-professional-studies/graduate-studies/resources.aspx",
@@ -126,19 +141,29 @@ def main():
         "https://www.hartford.edu/admission/partnerships/default.aspx",
         "https://www.hartford.edu/academics/graduate-professional-studies/",
         "https://www.hartford.edu/academics/graduate-professional-studies/graduate-studies/information-sessions/default.aspx",
-        "https://www.hartford.edu/academics/graduate-professional-studies/graduate-studies/graduate-student-experience.aspx", 
-
-        # URLs list continues...
+        "https://www.hartford.edu/academics/graduate-professional-studies/graduate-studies/graduate-student-experience.aspx",
+        # Your list of URLs here...
     ]
+
+    # Validate URLs
+    valid_urls = validate_urls(urls)
 
     # Automatic scraping on app load
     if 'contexts' not in st.session_state:
         with st.spinner("Scraping data..."):
-            st.session_state['contexts'] = scrape_website(urls)
+            st.session_state['contexts'] = scrape_website(valid_urls)
 
+    # Initialize conversation history
+    if 'conversation' not in st.session_state:
+        st.session_state['conversation'] = []
+
+    # User input
     user_query = st.text_input("Enter your query here:")
     if user_query and st.button("Answer Query"):
+        st.session_state['conversation'].append({"role": "user", "content": user_query})
+
         try:
+            # Find relevant chunks
             relevant_chunks, source_urls = find_relevant_chunks(
                 user_query, 
                 st.session_state['contexts'], 
@@ -146,18 +171,21 @@ def main():
                 prioritized_urls=[url for url in st.session_state['contexts']]
             )
 
-            # If no relevant chunks are found, provide a fallback response immediately
+            # Fallback if no relevant chunks are found
             if not relevant_chunks:
                 fallback_message = (
                     "I am sorry but I am unable to answer your amazing questions. "
                     "Please reach out to Grad Study at gradstudy@hartford.edu."
                 )
+                st.session_state['conversation'].append({"role": "assistant", "content": fallback_message})
                 st.markdown(f"**Response:** {fallback_message}")
                 return
 
+            # Prepare context for the model
             context_to_send = "\n\n".join(relevant_chunks)
             context_to_send = truncate_context_to_token_limit(context_to_send, 6000)
 
+            # Construct prompt
             prompt = f"""
 You are Hawk AI, assisting with inquiries about the University of Hartford Graduate Admissions. 
 Your responses should be strictly based on the information provided through official university pages linked in our system. 
@@ -170,13 +198,44 @@ Context:
 
 User Query: {user_query}
 """
-            groq_model = initialize_groq_model()
-            response = groq_model.invoke(prompt, timeout=30)
-            final_answer = response.content.strip()
-            st.markdown(f"**Response:** {final_answer}")
+            # Initialize DeepSeek model
+            deepseek_endpoint, headers = initialize_deepseek_model()
+            payload = {
+                "model": "deepseek-model-name",  # Replace with actual model name
+                "messages": [
+                    {"role": "system", "content": "You are Hawk AI, an admissions assistant for the University of Hartford."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 1000
+            }
+            response = requests.post(deepseek_endpoint, headers=headers, json=payload)
+            response_data = response.json()
+
+            if response.status_code == 200:
+                final_answer = response_data['choices'][0]['message']['content'].strip()
+                st.session_state['conversation'].append({"role": "assistant", "content": final_answer})
+                st.markdown(f"**Response:** {final_answer}")
+
+                # Display sources
+                if source_urls:
+                    st.write("**Sources:**")
+                    for url in set(source_urls):  # Remove duplicates
+                        st.write(f"- {url}")
+            else:
+                st.error(f"Error from DeepSeek API: {response_data.get('error', 'Unknown error')}")
 
         except Exception as e:
             st.error(f"Error generating response: {e}")
+
+    # Display conversation history
+    for message in st.session_state['conversation']:
+        role = "You" if message["role"] == "user" else "Hawk AI"
+        st.write(f"**{role}:** {message['content']}")
+
+    # Clear conversation button
+    if st.button("Clear Conversation"):
+        st.session_state['conversation'] = []
 
 if __name__ == "__main__":
     main()
