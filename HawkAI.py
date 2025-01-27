@@ -218,10 +218,10 @@ User Query: {user_query}
                 st.markdown(f"**Response:** {final_answer}")
 
                 # Display sources
-                if source_urls:
-                    st.write("**Sources:**")
-                    for url in set(source_urls):  # Remove duplicates
-                        st.write(f"- {url}")
+                #if source_urls:
+                 #   st.write("**Sources:**")
+                 #   for url in set(source_urls):  # Remove duplicates
+                    #    st.write(f"- {url}")
             else:
                 st.error(f"Error from DeepSeek API: {response_data.get('error', 'Unknown error')}")
 
