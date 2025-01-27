@@ -201,7 +201,7 @@ User Query: {user_query}
             # Initialize DeepSeek model
             deepseek_endpoint, headers = initialize_deepseek_model()
             payload = {
-                "model": "deepseek-model-name",  # Replace with actual model name
+                "model": "deepseek-chat",  # Replace with actual model name
                 "messages": [
                     {"role": "system", "content": "You are Hawk AI, an admissions assistant for the University of Hartford."},
                     {"role": "user", "content": prompt}
