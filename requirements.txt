@@ -13,4 +13,4 @@ openai
 requests
 fuzzywuzzy
 python-Levenshtein
-validator
+validators
