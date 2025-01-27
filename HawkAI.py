@@ -206,7 +206,7 @@ User Query: {user_query}
                     {"role": "system", "content": "You are Hawk AI, an admissions assistant for the University of Hartford."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.2,
+                "temperature": 0.,
                 "max_tokens": 1000
             }
             response = requests.post(deepseek_endpoint, headers=headers, json=payload)
