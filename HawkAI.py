@@ -145,7 +145,7 @@ def main():
         # Your list of URLs here...
     ]
 
-    # Validate URLs
+ # Validate URLs
     valid_urls = validate_urls(urls)
 
     # Automatic scraping on app load
@@ -157,36 +157,48 @@ def main():
     if 'conversation' not in st.session_state:
         st.session_state['conversation'] = []
 
+    # Initialize response cache
+    if 'response_cache' not in st.session_state:
+        st.session_state['response_cache'] = {}
+
     # User input
     user_query = st.text_input("Enter your query here:")
     if user_query and st.button("Answer Query"):
-        st.session_state['conversation'].append({"role": "user", "content": user_query})
+        # Check if the query has already been asked
+        if user_query in st.session_state['response_cache']:
+            cached_response = st.session_state['response_cache'][user_query]
+            st.session_state['conversation'].append({"role": "user", "content": user_query})
+            st.session_state['conversation'].append({"role": "assistant", "content": cached_response})
+            st.markdown(f"**Response:** {cached_response}")
+        else:
+            st.session_state['conversation'].append({"role": "user", "content": user_query})
 
-        try:
-            # Find relevant chunks
-            relevant_chunks, source_urls = find_relevant_chunks(
-                user_query, 
-                st.session_state['contexts'], 
-                token_limit=6000, 
-                prioritized_urls=[url for url in st.session_state['contexts']]
-            )
-
-            # Fallback if no relevant chunks are found
-            if not relevant_chunks:
-                fallback_message = (
-                    "I am sorry but I am unable to answer your amazing questions. "
-                    "Please reach out to Grad Study at gradstudy@hartford.edu."
+            try:
+                # Find relevant chunks
+                relevant_chunks, source_urls = find_relevant_chunks(
+                    user_query, 
+                    st.session_state['contexts'], 
+                    token_limit=6000, 
+                    prioritized_urls=[url for url in st.session_state['contexts']]
                 )
-                st.session_state['conversation'].append({"role": "assistant", "content": fallback_message})
-                st.markdown(f"**Response:** {fallback_message}")
-                return
 
-            # Prepare context for the model
-            context_to_send = "\n\n".join(relevant_chunks)
-            context_to_send = truncate_context_to_token_limit(context_to_send, 6000)
+                # Fallback if no relevant chunks are found
+                if not relevant_chunks:
+                    fallback_message = (
+                        "I am sorry but I am unable to answer your amazing questions. "
+                        "Please reach out to Grad Study at gradstudy@hartford.edu."
+                    )
+                    st.session_state['conversation'].append({"role": "assistant", "content": fallback_message})
+                    st.session_state['response_cache'][user_query] = fallback_message
+                    st.markdown(f"**Response:** {fallback_message}")
+                    return
 
-            # Construct prompt
-            prompt = f"""
+                # Prepare context for the model
+                context_to_send = "\n\n".join(relevant_chunks)
+                context_to_send = truncate_context_to_token_limit(context_to_send, 6000)
+
+                # Construct prompt
+                prompt = f"""
 You are Hawk AI, assisting with inquiries about the University of Hartford Graduate Admissions. 
 Your responses should be strictly based on the information provided through official university pages linked in our system. 
 Directly answer inquiries about graduate and doctoral programs using this data available on the website. 
@@ -198,35 +210,36 @@ Context:
 
 User Query: {user_query}
 """
-            # Initialize DeepSeek model
-            deepseek_endpoint, headers = initialize_deepseek_model()
-            payload = {
-                "model": "deepseek-chat",  # Replace with actual model name
-                "messages": [
-                    {"role": "system", "content": "You are Hawk AI, an admissions assistant for the University of Hartford."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.,
-                "max_tokens": 1000
-            }
-            response = requests.post(deepseek_endpoint, headers=headers, json=payload)
-            response_data = response.json()
+                # Initialize DeepSeek model
+                deepseek_endpoint, headers = initialize_deepseek_model()
+                payload = {
+                    "model": "deepseek-chat",  # Replace with actual model name
+                    "messages": [
+                        {"role": "system", "content": "You are Hawk AI, an admissions assistant for the University of Hartford."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.,
+                    "max_tokens": 1000
+                }
+                response = requests.post(deepseek_endpoint, headers=headers, json=payload)
+                response_data = response.json()
 
-            if response.status_code == 200:
-                final_answer = response_data['choices'][0]['message']['content'].strip()
-                st.session_state['conversation'].append({"role": "assistant", "content": final_answer})
-                st.markdown(f"**Response:** {final_answer}")
+                if response.status_code == 200:
+                    final_answer = response_data['choices'][0]['message']['content'].strip()
+                    st.session_state['conversation'].append({"role": "assistant", "content": final_answer})
+                    st.session_state['response_cache'][user_query] = final_answer
+                    st.markdown(f"**Response:** {final_answer}")
 
-                # Display sources
-                #if source_urls:
-                 #   st.write("**Sources:**")
-                 #   for url in set(source_urls):  # Remove duplicates
+                    # Display sources
+                    #if source_urls:
+                    #   st.write("**Sources:**")
+                    #   for url in set(source_urls):  # Remove duplicates
                     #    st.write(f"- {url}")
-            else:
-                st.error(f"Error from DeepSeek API: {response_data.get('error', 'Unknown error')}")
+                else:
+                    st.error(f"Error from DeepSeek API: {response_data.get('error', 'Unknown error')}")
 
-        except Exception as e:
-            st.error(f"Error generating response: {e}")
+            except Exception as e:
+                st.error(f"Error generating response: {e}")
 
     # Display conversation history
     for message in st.session_state['conversation']:
@@ -236,6 +249,7 @@ User Query: {user_query}
     # Clear conversation button
     if st.button("Clear Conversation"):
         st.session_state['conversation'] = []
+        st.session_state['response_cache'] = {}
 
 if __name__ == "__main__":
     main()
